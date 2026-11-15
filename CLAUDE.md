@@ -41,6 +41,8 @@ GARMIN_DB=demo.duckdb .venv/bin/garmin-mcp    # server against demo data
 - **Tools return dicts that include `**_freshness(con)`**, anchor windows to the latest synced date with
   `_window()`, and put caveats in `notes`. Tool docstrings are the model's only docs: say *when* to use the tool.
 - New workflows: `/add-field` for a Garmin metric, `/add-tool` for an MCP tool, `/commit-push-pr` to ship.
+- **When you get something wrong here and the user corrects it, add the lesson to this file** (one line, in the
+  section it belongs to) as part of the fix.
 
 ## Garmin API facts (verified, not obvious)
 
