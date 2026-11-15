@@ -13,9 +13,6 @@
       "Bash(git log:*)"
     ],
     "ask": [
-      "Bash(.venv/bin/python -m garmin_sync.sync:*)",
-      "Bash(.venv/bin/python -m garmin_sync.explore:*)",
-      "Bash(.venv/bin/python -m evals.run:*)",
       "Bash(git push:*)"
     ],
     "deny": [
@@ -27,7 +24,12 @@
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
-        "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format.sh" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format.sh"
+          }
+        ]
       }
     ]
   }

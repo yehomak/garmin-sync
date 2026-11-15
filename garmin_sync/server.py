@@ -17,7 +17,7 @@ Personal Garmin health data (sleep, HRV, resting HR, Body Battery, stress, train
 synced daily into a local DuckDB database.
 
 How to work with it:
-- Check `data_through` / `warning` in every response. Windows end at the latest synced date, not today.
+- Check `data_through` / `warning` in responses. Windows end at the latest synced date, not today.
 - Start with get_snapshot for "how am I today", the *_trend tools for patterns, compare_periods for
   "this week vs last", and query_sql for anything else. Call describe_schema before writing SQL.
 - Read the `notes` field. Manually logged workouts have no heart rate, so their load is unknown,
@@ -85,7 +85,8 @@ def compare_periods(a_from: str, a_to: str, b_from: str, b_to: str) -> dict:
 def query_sql(sql: str) -> dict:
     """Run one read-only DuckDB SELECT against health_days / health_activities (max 500 rows).
     Use for questions the other tools don't answer: correlations, streaks, custom aggregations.
-    Call describe_schema first for column names and units."""
+    Call describe_schema first for column names and units. For "last N days", anchor to
+    (SELECT MAX(date) ...) or the data_through date, not current_date: syncs can lag."""
     return tools.query_sql(sql)
 
 

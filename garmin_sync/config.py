@@ -3,15 +3,20 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / ".env")
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 TOKENSTORE = ROOT / ".garth"
 RAW_DIR = ROOT / "data" / "raw"
 PHYSIOLOGY_PATH = ROOT / "data" / "physiology.json"
+
+
+def load_credentials() -> None:
+    """Load .env (GARMIN_EMAIL / GARMIN_PASSWORD). Only the auth modules call this, so the
+    MCP server process never holds Garmin credentials."""
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
 
 
 def db_path() -> Path:

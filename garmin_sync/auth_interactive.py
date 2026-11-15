@@ -16,10 +16,11 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="garth")
 
 import garth.http  # noqa: E402
 
-from garmin_sync.config import TOKENSTORE  # noqa: E402
+from garmin_sync.config import TOKENSTORE, load_credentials  # noqa: E402
 
 
 def main():
+    load_credentials()
     email = os.environ["GARMIN_EMAIL"]
     password = os.environ["GARMIN_PASSWORD"]
 

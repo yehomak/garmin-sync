@@ -44,6 +44,17 @@ async def test_call_tool_end_to_end(demo_env):
     assert payload["nights"] >= 5
 
 
+def test_server_process_never_loads_garmin_credentials(demo_env, monkeypatch):
+    import importlib
+    import os
+
+    import garmin_sync.server
+
+    monkeypatch.delenv("GARMIN_PASSWORD", raising=False)
+    importlib.reload(garmin_sync.server)
+    assert "GARMIN_PASSWORD" not in os.environ
+
+
 @pytest.mark.anyio
 async def test_server_ships_instructions_and_review_prompt(demo_env):
     async with Client(mcp) as client:

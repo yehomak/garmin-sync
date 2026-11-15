@@ -95,6 +95,13 @@ def test_query_sql_refuses_writes_and_file_access(demo_db, sql):
     assert tools.query_sql("SELECT COUNT(*) AS n FROM health_days", path=demo_db)["rows"] == [{"n": 120}]
 
 
+def test_query_sql_reports_freshness_and_warns_about_current_date(demo_db):
+    out = tools.query_sql("SELECT COUNT(*) AS n FROM health_days WHERE date > current_date - 7", path=demo_db)
+    assert out["data_through"] == DEMO_END.isoformat()
+    assert "anchor to MAX(date)" in out["notes"][0]
+    assert "notes" not in tools.query_sql("SELECT 1 AS x", path=demo_db)
+
+
 def test_query_sql_truncates(demo_db):
     out = tools.query_sql("SELECT * FROM range(1000)", path=demo_db)
     assert out["row_count"] == tools.MAX_SQL_ROWS

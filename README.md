@@ -33,8 +33,8 @@ python3 bootstrap.py          # venv → install → login → backfill → prof
 claude mcp add -s user garmin -- "$PWD/.venv/bin/garmin-mcp"
 ```
 
-Keep it fresh with a daily job. On macOS, a launchd agent is better than cron because it runs missed jobs
-after sleep.
+Keep it fresh with a daily job, for example cron. On macOS, prefer a launchd agent with the same command,
+because launchd runs jobs that were missed while the machine was asleep.
 
 ```bash
 0 8 * * * cd /path/to/garmin-sync && .venv/bin/garmin-sync >> /tmp/garmin-sync.log 2>&1
@@ -70,10 +70,10 @@ confidence. The point of this project is everything around the numbers:
 
 | Problem in the raw data | What the server does |
 |---|---|
-| The sync stops silently; "last 7 days" goes empty | Windows end at the latest synced day; every response has `data_through`, `stale_days` and a `warning` |
+| The sync stops silently; "last 7 days" goes empty | Windows end at the latest synced day; every database tool returns `data_through`, `stale_days` and a `warning` when stale |
 | Manual workouts have no HR, and their load reads as 0 | `null` stays `null`; `notes` say how many sessions and minutes are unmeasured |
 | `hrv_status` is a lagging weekly label | `hrv_band` compares last night to your personal baseline |
-| Today's steps and Body Battery are half a day | Flagged as partial |
+| Today's steps and Body Battery are half a day | `get_snapshot` flags the current day as partial |
 | The model doesn't know units or quirks | `describe_schema` serves every column's unit, caveats and real fill rate |
 | Questions the tools didn't anticipate | `query_sql`: sandboxed, read-only DuckDB SQL |
 

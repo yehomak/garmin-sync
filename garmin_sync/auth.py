@@ -16,7 +16,7 @@ import sys
 import requests
 from garminconnect import Garmin, GarminConnectConnectionError
 
-from garmin_sync.config import TOKENSTORE
+from garmin_sync.config import TOKENSTORE, load_credentials
 
 LOGIN_TIMEOUT = 45  # seconds before giving up
 
@@ -52,6 +52,7 @@ def get_client() -> Garmin:
         except Exception:
             print("Saved session expired, re-authenticating...")
 
+    load_credentials()
     email = os.environ.get("GARMIN_EMAIL")
     password = os.environ.get("GARMIN_PASSWORD")
     if not (email and password):

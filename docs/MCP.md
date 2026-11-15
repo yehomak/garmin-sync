@@ -38,14 +38,14 @@ claude mcp add -s user garmin-demo -e GARMIN_DB="$PWD/demo.duckdb" -- "$PWD/.ven
 | `get_training_log(days, end_date)` | Training volume and intensity | Per-type totals, HR zones, `manual_sessions` |
 | `get_day(day)` | Explaining one specific day | Every metric plus that day's workouts |
 | `compare_periods(a_from, a_to, b_from, b_to)` | "This week vs last", "before vs after the trip" | Averages for both periods and B − A deltas |
-| `query_sql(sql)` | Everything else: correlations, streaks, custom cuts | Up to 500 rows |
+| `query_sql(sql)` | Everything else: correlations, streaks, custom cuts | Up to 500 rows; a note if the SQL uses `current_date` |
 | `describe_schema` | Before writing SQL, or "what does this metric mean?" | Column units, caveats, live fill rates |
-| `get_profile` | Age, weight, race predictions, PRs | Staleness warning past 45 days |
+| `get_profile` | Age, weight, race predictions, PRs | `profile_age_days`, warning past 45 days (reads `data/physiology.json`, not the DB) |
 
 There is also one prompt, `weekly_review`, which asks for the single most useful change for next week with
 supporting numbers.
 
-## What every response carries
+## What every database tool returns
 
 ```jsonc
 {

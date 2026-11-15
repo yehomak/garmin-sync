@@ -13,6 +13,7 @@ Ground truth is queried, never hand-typed, so cases stay valid when the demo gen
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 
 
 @dataclass
@@ -137,7 +138,8 @@ CASES = [
     Case(
         id="staleness",
         question="How many days old is my most recent data?",
-        truth=lambda sql: _one(sql, f"SELECT current_date - {LATEST}"),
+        # date.today(), not DuckDB current_date: that can be in another timezone, and the tools use date.today()
+        truth=lambda sql: (date.today() - date.fromisoformat(str(_one(sql, f"SELECT {LATEST}")))).days,
         check=_number_within(0),
         tools=set(),  # every tool reports freshness
     ),
