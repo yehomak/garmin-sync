@@ -119,9 +119,37 @@ answers mentioned that unprompted. The exception was the all-time weekend questi
 barely matters.
 
 What it doesn't show: these are lookup questions with one right number. A perfect score on seven of them is
-a regression baseline, not evidence the principles above hold. The cases that would test them are traps:
-"what was my training load last month?" when most sessions are unmeasured, "how did I sleep last night?"
-when the data is days old, "does sleep improve my readiness?" when the link is the formula. Those come next.
+a regression baseline, not evidence the principles above hold.
+
+## Second run: trap questions
+
+Three cases where the literal answer is wrong because the data misleads. Each is graded on whether the reply
+names the trap, and each grader is checked offline against a good reply (must pass) and a naive one (must
+fail) before any run.
+
+| Trap | Naive answer | What Claude did |
+|---|---|---|
+| "What was my training load over the last 4 weeks? High or low?" Most sessions were logged by hand. | Quotes Garmin's total and calls it low | Said Garmin "only sees about 20% of the training you actually did" (the runs), and that the rest is "unknown, not zero" |
+| "How did I sleep last night?" The data ends 4 days ago. | Reports the latest night as last night | "I can't tell you about last night yet", then summarised the latest night, labelled with its date |
+| "Does better sleep improve my readiness?" Readiness is computed from sleep. | "Yes, strong correlation" | "Part of that link is built in... Garmin calculates readiness partly from your sleep" |
+
+**Raw score 9/10; after fixing the grader, 10/10.** The one failure was mine. The correlation grader matched
+"readiness is calculated from sleep" but not "calculates readiness from sleep". Claude's reply was right,
+and the regex was too narrow. The grader now accepts both phrasings, and Claude's actual wording is kept as
+a regression example. `--regrade` re-scored the saved transcript without another model call.
+
+Two honest caveats:
+
+- **Changing a grader after seeing the result is how evals end up flattering you.** The guard here is that
+  the naive reply must still fail, and `--check` enforces that. Even so, keyword graders are coarse. A
+  model-graded rubric would be the next step.
+- **The correlation answer was good, not perfect.** As evidence that the effect is real, it cited HRV's
+  strong link to readiness, but HRV is also a readiness input. The sleep-to-HRV link it also cited is the
+  better evidence. The grader doesn't catch that kind of mistake.
+
+The tool design is doing what it was built for: every trap was avoided using information the tools put in
+front of the model (`notes`, `data_through`, schema comments, server instructions). That's what turned
+lessons 1, 3 and 5 into behaviour.
 
 ## Still open
 - Sleep times are stored in UTC, so bedtime analysis needs a timezone the data doesn't carry.

@@ -102,7 +102,8 @@ def grade(case: Case, expected, final_text: str, called: list[str], usage: dict,
     match = ANSWER_RE.findall(final_text)
     answer = match[-1].strip() if match else ""
     used_tool = not case.tools or bool(case.tools & set(called))
-    passed = bool(answer) and used_tool and case.check(answer, expected)
+    graded_text = final_text if case.grade_full_text else answer
+    passed = bool(answer) and used_tool and case.check(graded_text, expected)
     return {
         "id": case.id,
         "passed": passed,
@@ -188,10 +189,17 @@ async def main(selected: list[Case], check_only: bool, backend: str = "api") -> 
             for case in selected:
                 expected = case.truth(lambda q: tools.query_sql(q, path=DEMO_PATH))
                 assert expected is not None, f"{case.id}: ground truth is null"
-                rendered = (
-                    {True: "yes", False: "no"}.get(expected, expected) if isinstance(expected, bool) else expected
-                )
-                assert case.check(f"{rendered}", expected), f"{case.id}: check rejects its own ground truth"
+                if case.grade_full_text:
+                    assert case.good and case.naive, f"{case.id}: trap cases need good and naive examples"
+                    goods = case.good if isinstance(case.good, list) else [case.good]
+                    for good in goods:
+                        assert case.check(good, expected), f"{case.id}: grader rejects a good example: {good[:60]}"
+                    assert not case.check(case.naive, expected), f"{case.id}: grader accepts the naive example"
+                else:
+                    rendered = (
+                        {True: "yes", False: "no"}.get(expected, expected) if isinstance(expected, bool) else expected
+                    )
+                    assert case.check(f"{rendered}", expected), f"{case.id}: check rejects its own ground truth"
                 print(f"  ok  {case.id:26} expected={expected}")
             print(f"{len(selected)} cases valid, {len(api_tools)} tools converted. No API calls made.")
             return 0
@@ -202,6 +210,22 @@ async def main(selected: list[Case], check_only: bool, backend: str = "api") -> 
         t0 = time.monotonic()
         results = [await run_case(client, mcp_client, api_tools, instructions, c) for c in selected]
     return report(results, f"api-{MODEL}", t0)
+
+
+def regrade(path: Path) -> int:
+    """Re-score a saved run with the current graders, without calling the model again."""
+    saved = json.loads(path.read_text())
+    by_id = {c.id: c for c in CASES}
+    results = []
+    for r in saved["results"]:
+        case = by_id.get(r["id"])
+        if case is None:
+            continue
+        new = grade(case, r["expected"], r["final_text"], r["tools_called"], r["usage"], r["stop_reason"])
+        if new["passed"] != r["passed"]:
+            print(f"  changed  {r['id']}: {r['passed']} → {new['passed']}")
+        results.append(new)
+    return report(results, f"{saved.get('backend', 'run')}-regraded", time.monotonic())
 
 
 def report(results: list[dict], label: str, t0: float) -> int:
@@ -235,6 +259,9 @@ if __name__ == "__main__":
     parser.add_argument("--check", action="store_true", help="Validate cases and tools without calling the API")
     parser.add_argument("-k", help="Run only cases whose id contains this string")
     parser.add_argument("--backend", choices=["api", "claude-code"], default="api")
+    parser.add_argument("--regrade", type=Path, metavar="RESULTS_JSON", help="Re-score a saved run, no model calls")
     args = parser.parse_args()
+    if args.regrade:
+        raise SystemExit(regrade(args.regrade))
     chosen = [c for c in CASES if not args.k or args.k in c.id]
     raise SystemExit(asyncio.run(main(chosen, args.check, args.backend)))

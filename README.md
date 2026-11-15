@@ -100,8 +100,9 @@ A typical change: describe it, let Claude plan, review the plan, let it edit, ru
 .venv/bin/python -m evals.run           # same, over the Messages API. Needs ANTHROPIC_API_KEY.
 ```
 
-**Latest eval: 7/7** (Claude Opus 5.5 via Claude Code, one run). The cases are lookups, so that's a baseline
-rather than proof. Details and the harder trap cases still to add: [docs/LESSONS.md](docs/LESSONS.md#first-eval-run-7-of-7-which-mostly-says-the-cases-are-too-easy).
+**Latest eval: 10/10** (Claude Opus 5.5 via Claude Code, one run): 7 lookups and 3 traps where the literal
+answer is wrong. Raw score 9/10; the miss was a grader bug, not the model. Details:
+[docs/LESSONS.md](docs/LESSONS.md#second-run-trap-questions).
 
 How it fits together: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
