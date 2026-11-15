@@ -6,3 +6,8 @@ data/
 __pycache__/
 *.pyc
 .env
+evals/results/
+demo.duckdb
+.claude/settings.local.json
+.pytest_cache/
+.ruff_cache/

@@ -1,31 +1,26 @@
 """
 First-time authentication via garth directly.
 
-Use this instead of auth.py when the scripted login hits CAPTCHA or MFA issues.
-It does a single clean attempt — no strategy cycling, no retries.
+Use this instead of garmin_sync.auth when the scripted login hits CAPTCHA or
+MFA issues. It does a single clean attempt — no strategy cycling, no retries.
 
-Usage:
-  .venv/bin/python auth_interactive.py
+  python -m garmin_sync.auth_interactive
 
-After success, .garth/ is saved and auth.py / sync.py / explore.py
-will reuse the session without re-authenticating.
+After success, .garth/ is saved and every other command reuses the session.
 """
 
 import os
-from pathlib import Path
-
 import warnings
+
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="garth")
 
-from dotenv import load_dotenv
-import garth.http
+import garth.http  # noqa: E402
 
-load_dotenv()
-
-TOKENSTORE = Path(__file__).parent / ".garth"
+from garmin_sync.config import TOKENSTORE, load_credentials  # noqa: E402
 
 
 def main():
+    load_credentials()
     email = os.environ["GARMIN_EMAIL"]
     password = os.environ["GARMIN_PASSWORD"]
 

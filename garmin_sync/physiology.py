@@ -2,19 +2,18 @@
 """
 Fetch physiological profile from Garmin API and save to data/physiology.json.
 
-  .venv/bin/python fetch_physiology.py
+  python -m garmin_sync.physiology
 
 Pulls: user profile (age, weight, height), race time predictions, personal records.
-Personalkin reads this file to personalize health reports and profiles.
+The MCP server serves this file through get_profile(). These values change
+slowly, so refresh monthly rather than daily.
 """
 
 import json
 from datetime import date, datetime
-from pathlib import Path
 
-from auth import get_client
-
-OUTPUT = Path(__file__).parent / "data" / "physiology.json"
+from garmin_sync.auth import get_client
+from garmin_sync.config import PHYSIOLOGY_PATH as OUTPUT
 
 
 def _secs_to_time(s) -> str:
@@ -38,11 +37,11 @@ def _parse_profile(raw: dict) -> dict:
             pass
     weight_g = ud.get("weight")
     return {
-        "gender":     (ud.get("gender") or "").lower() or None,
+        "gender": (ud.get("gender") or "").lower() or None,
         "birth_date": birth,
-        "age":        age,
-        "weight_kg":  round(weight_g / 1000, 1) if weight_g else None,
-        "height_cm":  ud.get("height"),
+        "age": age,
+        "weight_kg": round(weight_g / 1000, 1) if weight_g else None,
+        "height_cm": ud.get("height"),
     }
 
 
@@ -50,11 +49,11 @@ def _parse_race_predictions(raw: dict) -> dict | None:
     if not raw or not raw.get("time5K"):
         return None
     return {
-        "5k":            {"seconds": raw["time5K"],           "readable": _secs_to_time(raw["time5K"])},
-        "10k":           {"seconds": raw["time10K"],          "readable": _secs_to_time(raw["time10K"])},
+        "5k": {"seconds": raw["time5K"], "readable": _secs_to_time(raw["time5K"])},
+        "10k": {"seconds": raw["time10K"], "readable": _secs_to_time(raw["time10K"])},
         "half_marathon": {"seconds": raw["timeHalfMarathon"], "readable": _secs_to_time(raw["timeHalfMarathon"])},
-        "marathon":      {"seconds": raw["timeMarathon"],     "readable": _secs_to_time(raw["timeMarathon"])},
-        "as_of":         raw.get("calendarDate"),
+        "marathon": {"seconds": raw["timeMarathon"], "readable": _secs_to_time(raw["timeMarathon"])},
+        "as_of": raw.get("calendarDate"),
     }
 
 
@@ -63,7 +62,7 @@ PR_TYPE_NAMES = {1: "1km", 2: "1mi", 3: "5km", 7: "10km", 4: "half_marathon", 6:
 
 def _parse_personal_records(raw: list) -> list:
     out, seen = [], set()
-    for r in (raw or []):
+    for r in raw or []:
         type_id = r.get("typeId")
         if type_id not in PR_TYPE_NAMES:
             continue
@@ -74,19 +73,21 @@ def _parse_personal_records(raw: list) -> list:
             continue
         seen.add(name)
         val_s = r.get("value")
-        out.append({
-            "distance": name,
-            "seconds":  round(val_s) if val_s else None,
-            "readable": _secs_to_time(val_s) if val_s else None,
-            "activity": r.get("activityName"),
-            "date":     (r.get("actStartDateTimeInGMTFormatted") or "")[:10] or None,
-        })
+        out.append(
+            {
+                "distance": name,
+                "seconds": round(val_s) if val_s else None,
+                "readable": _secs_to_time(val_s) if val_s else None,
+                "activity": r.get("activityName"),
+                "date": (r.get("actStartDateTimeInGMTFormatted") or "")[:10] or None,
+            }
+        )
     sort_order = {v: i for i, v in enumerate(PR_TYPE_NAMES.values())}
     return sorted(out, key=lambda x: sort_order.get(x["distance"], 99))
 
 
 def _parse_vo2max(raw: list) -> float | None:
-    for item in (raw or []):
+    for item in raw or []:
         for key in ("vo2MaxPreciseValue", "vo2Max"):
             if item.get(key):
                 return item[key]
@@ -126,9 +127,9 @@ def main():
         pass
 
     result = {
-        "generated":        today,
-        "profile":          profile,
-        "vo2_max":          vo2_max,
+        "generated": today,
+        "profile": profile,
+        "vo2_max": vo2_max,
         "race_predictions": race_preds,
         "personal_records": prs,
     }
@@ -143,9 +144,10 @@ def main():
     if vo2_max:
         print(f"  VO2 max: {vo2_max}")
     if race_preds:
-        print(f"  Predicted: 5k {race_preds['5k']['readable']}  10k {race_preds['10k']['readable']}  HM {race_preds['half_marathon']['readable']}")
+        p = {k: race_preds[k]["readable"] for k in ("5k", "10k", "half_marathon")}
+        print(f"  Predicted: 5k {p['5k']}  10k {p['10k']}  HM {p['half_marathon']}")
     if prs:
-        print(f"  PRs: " + "  ".join(f"{r['distance']} {r['readable']}" for r in prs))
+        print("  PRs: " + "  ".join(f"{r['distance']} {r['readable']}" for r in prs))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,15 @@
+{
+  "mostRecentTrainingStatus": {
+    "latestTrainingStatusData": {
+      "111": {"primaryTrainingDevice": false, "trainingStatusFeedbackPhrase": "DETRAINING",
+              "acuteTrainingLoadDTO": {"acwrStatus": "LOW"}},
+      "222": {"primaryTrainingDevice": true, "trainingStatusFeedbackPhrase": "PRODUCTIVE_3",
+              "acuteTrainingLoadDTO": {"acwrStatus": "OPTIMAL"}}
+    }
+  },
+  "mostRecentTrainingLoadBalance": {
+    "metricsTrainingLoadBalanceDTOMap": {
+      "222": {"primaryTrainingDevice": true, "trainingBalanceFeedbackPhrase": "AEROBIC_LOW_SHORTAGE"}
+    }
+  }
+}

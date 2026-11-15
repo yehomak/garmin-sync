@@ -1,0 +1,9 @@
+[
+  {"activityId": 9001, "startTimeLocal": "2026-03-01 18:00:00", "activityType": {"typeKey": "running"},
+   "duration": 2400.0, "distance": 6000.0, "averageSpeed": 2.5, "averageHR": 148.0, "maxHR": 175.0,
+   "calories": 420.0, "aerobicTrainingEffect": 3.4, "anaerobicTrainingEffect": 1.1,
+   "activityTrainingLoad": 140.2, "manualActivity": false},
+  {"activityId": 9002, "startTimeLocal": "2026-03-02 19:00:00", "activityType": {"typeKey": "mixed_martial_arts"},
+   "duration": 5400.0, "calories": 700.0, "manualActivity": true},
+  {"activityType": {"typeKey": "running"}}
+]

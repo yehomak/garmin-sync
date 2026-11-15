@@ -1,186 +1,116 @@
 # garmin-sync
 
-Your Garmin data, in plain SQL.
-
-Pulls sleep, HRV, training load, Body Battery, and workout history from Garmin Connect into a local DuckDB file — queryable with any SQL tool, notebook, or AI assistant.
-
-```sql
--- How does training load affect recovery?
-SELECT date, sleep_score, training_readiness_score, hrv_last_night
-FROM   health_days
-ORDER BY date DESC LIMIT 30;
-
--- Which activity type leaves you most recovered the next day?
-SELECT   a.activity_type,
-         ROUND(AVG(d.hrv_last_night), 1) AS next_day_hrv
-FROM     health_activities a
-JOIN     health_days d ON d.date = a.date + INTERVAL 1 DAY
-GROUP BY a.activity_type
-ORDER BY next_day_hrv DESC;
-```
-
-> **Unofficial API** — uses [`garminconnect`](https://github.com/cyberjunky/python-garminconnect), which wraps Garmin Connect's undocumented internal API. Personal use only.
-
----
-
-## Quick start
-
-**1. Clone and configure**
+Ask Claude about your Garmin data. A daily sync copies Garmin Connect into a local DuckDB file, and a
+read-only MCP server lets Claude answer questions about your sleep, recovery and training.
 
 ```bash
-git clone https://github.com/yehomak/garmin-sync.git
-cd garmin-sync
-cp .env.example .env
+git clone https://github.com/Yegor-M/garmin-sync.git && cd garmin-sync
+uv sync && .venv/bin/garmin-demo        # synthetic data, no Garmin account needed
+claude mcp add garmin-demo -e GARMIN_DB="$PWD/demo.duckdb" -- "$PWD/.venv/bin/garmin-mcp"
+claude "how was my training over the last month?"
 ```
 
-Open `.env` and fill in your Garmin Connect credentials:
+## Why
 
-```
-GARMIN_EMAIL=you@example.com
-GARMIN_PASSWORD=yourpassword
+Giving a model raw health data produces confident, wrong answers. The sync stops and an empty week reads
+as a bad week. Workouts logged by hand have no heart rate, so their load sums to zero. Garmin's own labels
+lag the numbers underneath them. All of these happened while building this. Each one is now fixed in the
+tools rather than left to the prompt. The full write-up: **[docs/LESSONS.md](docs/LESSONS.md)**.
+
+## Principles
+
+Each principle is enforced by code and checked by a test, not by convention.
+
+1. **Say how fresh the data is.** Windows end at the latest synced day, and every database tool returns
+   `data_through`, `stale_days` and a warning.
+   [`_freshness`](garmin_sync/tools.py) · `test_stale_data_is_flagged`
+2. **Unknown is not zero.** Missing stays `null`, and tools say in words what they couldn't count.
+   [`get_training_log`](garmin_sync/tools.py) · `test_training_log_flags_manual_sessions_as_unknown_load`
+3. **Caveats travel with the data.** They go in each response's `notes`, where the model can't miss them,
+   not in a system prompt it may or may not apply.
+4. **One source of truth for meaning.** Units and caveats are `COMMENT ON COLUMN` in
+   [`schema.sql`](garmin_sync/schema.sql). The model reads them through `describe_schema`, and
+   [docs/DATA.md](docs/DATA.md) is generated from them. · `test_every_column_is_documented`,
+   `test_data_dictionary_matches_schema`
+5. **Read-only by construction.** The server never calls Garmin. `query_sql` runs on a locked, offline,
+   read-only connection. · `test_query_sql_refuses_writes_and_file_access`
+6. **Measure with evals.** Claude answers real questions through the real server, graded against
+   SQL-computed ground truth. · [`evals/`](evals/)
+
+## What the model sees
+
+Real output of `get_training_log(28)` on the demo database:
+
+```json
+{
+  "data_through": "2026-03-31",
+  "sessions": 18,
+  "recorded_training_load": 523.0,
+  "by_type": {
+    "mixed_martial_arts": { "sessions": 11, "minutes": 932.3, "manual_sessions": 11 },
+    "running":            { "sessions": 4,  "minutes": 152.2, "manual_sessions": 0 }
+  },
+  "notes": [
+    "11 of 18 sessions (932 min) have no heart rate, usually because they were logged manually. Their load is unknown, not zero, and Garmin readiness and training status do not account for them."
+  ]
+}
 ```
 
-**2. Run setup**
+Nine tools: `get_snapshot`, `get_sleep_trend`, `get_recovery_trend`, `get_training_log`, `get_day`,
+`compare_periods`, `query_sql`, `describe_schema` and `get_profile`, plus a `weekly_review` prompt.
+Reference: [docs/MCP.md](docs/MCP.md).
+
+## Use your own data
 
 ```bash
-python3 setup.py
+cp .env.example .env       # Garmin email + password, used only for the first login
+python3 bootstrap.py       # venv, install, login, backfill, profile. Safe to re-run.
+claude mcp add -s user garmin -- "$PWD/.venv/bin/garmin-mcp"
 ```
 
-This installs dependencies, authenticates with Garmin, backfills recent history, and fetches your physiology profile (age, weight, race predictions). Safe to re-run.
+Schedule `garmin-sync` daily: a launchd agent on macOS, cron elsewhere (`garmin-sync --help` for the
+options). After the first login the session is
+cached in `.garth/`. Garmin rate-limits logins per IP; on a 429, wait 30–60 minutes.
 
-**3. Query your data**
+Your data stays on your machine. Claude sees only what the tools return in a conversation.
 
-```bash
-duckdb garmin.duckdb
-```
+## Working on this repo with Claude Code
 
-```sql
--- Last 7 days at a glance
-SELECT date, sleep_score, hrv_last_night, training_readiness_score, steps
-FROM health_days
-ORDER BY date DESC
-LIMIT 7;
-```
+The repo is set up so Claude Code can make changes and prove they work.
 
-**4. Schedule daily syncs** *(optional)*
-
-On macOS, run `python3 setup.py` in [Personalkin](https://github.com/Yegor-M/Personalkin) — it generates and loads the launchd agent for you. On Linux, add a cron job:
-
-```bash
-0 8 * * * cd /path/to/garmin-sync && .venv/bin/python sync.py
-```
-
-**5. Connect to AI** *(optional)*
-
-[Personalkin](https://github.com/Yegor-M/Personalkin) is an MCP server that lets Claude query your data in plain language. Point it at `garmin.duckdb` and ask things like *"How did I sleep this week?"* or *"Show my training load trend."*
-
----
-
-## How it works
-
-```
-Garmin Connect  ──[ garminconnect ]──▶  sync.py  ──▶  garmin.duckdb
-```
-
-`sync.py` calls each endpoint, extracts fields, and upserts into DuckDB. Re-running the same date is safe — all syncs are idempotent.
-
----
-
-## Data model
-
-### `health_days` — one row per calendar date
-
-| Category | Fields |
+| File | What it does |
 |---|---|
-| Sleep | `sleep_score`, `sleep_total_min`, `sleep_deep_min`, `sleep_rem_min`, `sleep_spo2_avg`, `sleep_rr_avg` |
-| HRV | `hrv_last_night`, `hrv_weekly_avg`, `hrv_baseline_low/high`, `hrv_status` |
-| Heart rate | `rhr`, `hr_min`, `hr_max`, `stress_avg` |
-| Body Battery | `bb_max`, `bb_min`, `bb_end` |
-| Movement | `steps`, `distance_km`, `floors_up`, `calories_total` |
-| Respiration | `spo2_avg`, `spo2_min`, `rr_waking_avg` |
-| Training | `training_readiness_score`, `training_status_phrase`, `acwr_status`, `recovery_time_hours`, `endurance_score`, `fitness_age` |
+| [`CLAUDE.md`](CLAUDE.md) | Project rules and the non-obvious Garmin API facts. When Claude gets something wrong here, the fix includes a line in this file. |
+| [`/verify`](.claude/commands/verify.md) | The verification loop: ruff, pytest, docs drift, eval validity. Offline, seconds. Nothing counts as done until it passes. |
+| [`/add-field`](.claude/commands/add-field.md), [`/add-tool`](.claude/commands/add-tool.md) | The two common changes, as step-by-step workflows that keep the schema, docs, tests and evals in sync. |
+| [`/audit-data`](.claude/commands/audit-data.md) | Fill-rate audit on real data. It catches what tests can't (see lesson 2). |
+| [`/commit-push-pr`](.claude/commands/commit-push-pr.md) | Verify → privacy review → commit → PR. Asks before pushing. |
+| [`privacy-reviewer`](.claude/agents/privacy-reviewer.md) | Subagent that checks diffs for personal data. The author's real data lives next to this public repo. |
+| [`settings.json`](.claude/settings.json) | Shared permissions: local checks run without prompts, anything that hits Garmin or costs money asks first, and `.env` and `.garth/` can't be read. A hook formats every edited Python file. |
 
-### `health_activities` — one row per workout
+A typical change: describe it, let Claude plan, review the plan, let it edit, run `/verify`, then
+`/commit-push-pr`.
 
-| Field | Notes |
-|---|---|
-| `activity_type` | `running`, `strength_training`, `cycling`, `boxing`, … |
-| `duration_min`, `distance_km`, `avg_pace_min_km` | pace is null for non-GPS activities |
-| `avg_hr`, `max_hr` | |
-| `hr_zone1_min` … `hr_zone5_min` | minutes in each HR zone |
-| `training_load`, `training_effect_aerobic`, `training_effect_anaerobic` | 0–5 scale for effects |
-
----
-
-## Setup
+## Tests and evals
 
 ```bash
-git clone https://github.com/Yegor-M/garmin-sync.git
-cd garmin-sync
-cp .env.example .env        # add GARMIN_EMAIL and GARMIN_PASSWORD
-python3 setup.py            # deps → auth → backfill → physiology
+.venv/bin/python -m pytest              # unit, sync, tools, MCP protocol, eval loop. ~2 s, no network
+.venv/bin/python -m evals.run --check   # validates every eval case and its grader, no API calls (runs in CI)
+.venv/bin/python -m evals.run --backend claude-code   # Claude against the real server, on your Claude login
+.venv/bin/python -m evals.run           # same, over the Messages API. Needs ANTHROPIC_API_KEY.
 ```
 
-`setup.py` is idempotent — safe to re-run if any step fails.
+**Latest eval: 10/10** (Claude Opus 5.5 via Claude Code, one run): 7 lookups and 3 traps where the literal
+answer is wrong. Raw score 9/10; the miss was a grader bug, not the model. Details:
+[docs/LESSONS.md](docs/LESSONS.md#second-run-trap-questions).
 
-> **Rate limits:** Garmin returns 429 on too many login attempts from one IP. Wait 30–60 min or use a US VPN, then retry.
+How it fits together: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-<details>
-<summary>Manual steps</summary>
+## Limits
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python auth.py
-.venv/bin/python sync.py --backfill 30
-.venv/bin/python fetch_physiology.py   # optional: age, weight, race preds, PRs
-```
+- Built on [`garminconnect`](https://github.com/cyberjunky/python-garminconnect), an unofficial wrapper
+  around Garmin Connect's internal API. It can break when Garmin changes things. Personal use only.
+- Daily granularity. No FIT files.
+- Sleep times are stored in UTC.
 
-</details>
-
----
-
-## Usage
-
-```bash
-.venv/bin/python sync.py                      # yesterday + today
-.venv/bin/python sync.py --date 2026-05-15    # specific date
-.venv/bin/python sync.py --backfill 365       # last N days
-.venv/bin/python sync.py --status             # DB summary — rows, date range, session
-.venv/bin/python explore.py --date 2026-05-21 # dump raw JSON to data/raw/
-.venv/bin/python fetch_physiology.py          # refresh profile + race predictions
-```
-
----
-
-## Automation
-
-**macOS — launchd** (fires on wake, unlike cron):
-
-```xml
-<!-- ~/Library/LaunchAgents/com.garmin-sync.daily.plist -->
-<key>ProgramArguments</key><array>
-    <string>/path/to/garmin-sync/.venv/bin/python</string>
-    <string>/path/to/garmin-sync/sync.py</string>
-</array>
-<key>StartCalendarInterval</key><dict>
-    <key>Hour</key><integer>8</integer>
-    <key>Minute</key><integer>0</integer>
-</dict>
-```
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.garmin-sync.daily.plist
-```
-
-**Linux — cron:**
-
-```bash
-0 8 * * * cd /path/to/garmin-sync && .venv/bin/python sync.py >> /tmp/garmin-sync.log 2>&1
-```
-
----
-
-## Use with Personalkin
-
-[Personalkin](https://github.com/Yegor-M/Personalkin) is an MCP server that connects AI assistants directly to your Garmin data. Point its `GARMIN_DB` env var at `garmin.duckdb` and ask questions in plain language — "How did I sleep this week?", "Show last week's training load" — from Claude, Cursor, or any MCP-compatible client.
+MIT

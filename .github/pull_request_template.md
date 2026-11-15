@@ -1,15 +1,15 @@
 ## What
-<!-- One sentence description of the change -->
+<!-- One sentence. -->
 
 ## Why
-<!-- The reason this was needed — a gap, a bug, a new endpoint, etc. -->
+<!-- The gap, bug or question this answers. -->
 
 ## Schema changes
-<!-- List any new columns or tables. Note whether ALTER TABLE is safe or a rebuild is needed. -->
+<!-- New columns need a CREATE TABLE entry, an ALTER TABLE ... ADD COLUMN IF NOT EXISTS migration and a COMMENT ON COLUMN. -->
 None
 
 ## Testing
-- [ ] `sync.py --date <recent-date>` runs cleanly
-- [ ] New fields appear in DuckDB with expected values
-- [ ] Existing fields unaffected (spot-check a known date)
-- [ ] `explore.py` output matches extraction logic (if adding a new endpoint)
+- [ ] `/verify` passes (ruff, pytest, docs --check, evals --check)
+- [ ] For sync changes: `python -m garmin_sync.sync --date <recent date>` runs cleanly against a real account
+- [ ] For tool changes: an eval case covers the new behaviour
+- [ ] No personal data in fixtures, docs or examples (privacy-reviewer: CLEAN)

@@ -2,9 +2,9 @@
 """
 Garmin Sync setup — run once after cloning.
 
-  python setup.py
+  python3 bootstrap.py
 
-Installs dependencies, authenticates with Garmin Connect,
+Creates .venv, installs the package, authenticates with Garmin Connect,
 runs an initial backfill, and fetches your physiology profile.
 Safe to re-run; skips steps already done.
 """
@@ -17,10 +17,22 @@ from pathlib import Path
 HERE = Path(__file__).parent
 
 
-def ok(msg):   print(f"  ✓ {msg}")
-def info(msg): print(f"  · {msg}")
-def warn(msg): print(f"  ⚠ {msg}")
-def step(n, total, title): print(f"\n[{n}/{total}] {title}")
+def ok(msg):
+    print(f"  ✓ {msg}")
+
+
+def info(msg):
+    print(f"  · {msg}")
+
+
+def warn(msg):
+    print(f"  ⚠ {msg}")
+
+
+def step(n, total, title):
+    print(f"\n[{n}/{total}] {title}")
+
+
 def ask(prompt, default=""):
     suffix = f" [{default}]" if default else ""
     val = input(f"  {prompt}{suffix}: ").strip()
@@ -41,13 +53,14 @@ def python() -> str:
 
 # ── steps ─────────────────────────────────────────────────────────────────────
 
+
 def install_deps():
     venv = HERE / ".venv"
     if not venv.exists():
         info("Creating .venv...")
         run([sys.executable, "-m", "venv", str(venv)])
-    info("Installing requirements...")
-    run([python(), "-m", "pip", "install", "-q", "-r", str(HERE / "requirements.txt")])
+    info("Installing garmin-sync...")
+    run([python(), "-m", "pip", "install", "-q", "-e", str(HERE)])
     ok("dependencies ready")
 
 
@@ -62,7 +75,7 @@ def garmin_auth():
 
     if not env_file.exists() and not has_env_vars:
         print()
-        email    = ask("Garmin email")
+        email = ask("Garmin email")
         password = ask("Garmin password")
         env_file.write_text(f"GARMIN_EMAIL={email}\nGARMIN_PASSWORD={password}\n")
         ok(".env written")
@@ -72,9 +85,9 @@ def garmin_auth():
         ok("credentials found in environment")
 
     info("Authenticating (may take ~10s)...")
-    result = subprocess.run([python(), "auth.py"], cwd=HERE)
+    result = subprocess.run([python(), "-m", "garmin_sync.auth"], cwd=HERE)
     if result.returncode != 0:
-        warn("Auth failed — try: .venv/bin/python auth_interactive.py")
+        warn("Auth failed — try: .venv/bin/python -m garmin_sync.auth_interactive")
         if ask("Continue anyway?", "y").lower() != "y":
             sys.exit(1)
     else:
@@ -94,7 +107,7 @@ def initial_sync():
         days = 30
 
     info(f"Syncing {days} days...")
-    subprocess.run([python(), "sync.py", "--backfill", str(days)], cwd=HERE)
+    subprocess.run([python(), "-m", "garmin_sync.sync", "--backfill", str(days)], cwd=HERE)
     ok("backfill done")
 
 
@@ -105,12 +118,13 @@ def fetch_physiology():
         return
     info("Fetching physiology from Garmin API...")
     try:
-        subprocess.run([python(), "fetch_physiology.py"], cwd=HERE, check=True)
+        subprocess.run([python(), "-m", "garmin_sync.physiology"], cwd=HERE, check=True)
     except subprocess.CalledProcessError as e:
         warn(f"Physiology fetch failed: {e} (non-fatal, can re-run later)")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
 
 def main():
     print("\nGarmin Sync — Setup")
@@ -133,9 +147,8 @@ def main():
     print("  Database:   ", HERE / "garmin.duckdb")
     print("  Physiology: ", HERE / "data" / "physiology.json")
     print()
-    print("  Next: set up Personalkin for notifications and Claude integration.")
-    print(f"  Export this path for Personalkin's setup:\n")
-    print(f"    export GARMIN_SYNC={HERE}")
+    print("  Next: connect Claude to your data:\n")
+    print(f'    claude mcp add -s user garmin -- "{HERE}/.venv/bin/garmin-mcp"')
     print()
 
 
