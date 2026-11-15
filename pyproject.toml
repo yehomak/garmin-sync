@@ -1,0 +1,42 @@
+[project]
+name = "garmin-sync"
+version = "0.2.0"
+description = "Garmin Connect → local DuckDB, plus a read-only MCP server so Claude can answer questions about your health data."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "garminconnect>=0.3.3,<0.4",
+    "garth>=0.8.0",
+    "duckdb>=1.5.3",
+    "python-dotenv>=1.2.2",
+    "mcp>=2.3,<3",
+]
+
+[dependency-groups]
+dev = ["pytest>=9", "anyio>=4", "ruff>=0.17"]
+evals = ["anthropic>=2.8"]
+
+[project.scripts]
+garmin-sync = "garmin_sync.sync:main"
+garmin-mcp = "garmin_sync.server:main"
+garmin-demo = "garmin_sync.demo:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["garmin_sync"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

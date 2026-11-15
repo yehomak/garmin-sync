@@ -1,25 +1,23 @@
 """
 Garmin Connect authentication with session persistence.
 
-Subsequent runs reuse the saved session from .garth/ automatically.
+Subsequent runs reuse the saved session from .garth/ automatically, so
+credentials are only needed for the first login or after the session expires.
 
-Credentials via env vars:
-  GARMIN_EMAIL
-  GARMIN_PASSWORD
+  python -m garmin_sync.auth
+
+Credentials via env vars (or .env): GARMIN_EMAIL, GARMIN_PASSWORD
 """
 
 import os
 import signal
 import sys
-from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
 from garminconnect import Garmin, GarminConnectConnectionError
 
-load_dotenv()
+from garmin_sync.config import TOKENSTORE
 
-TOKENSTORE = Path(__file__).parent / ".garth"
 LOGIN_TIMEOUT = 45  # seconds before giving up
 
 
@@ -46,9 +44,6 @@ def _timeout_handler(signum, frame):
 
 
 def get_client() -> Garmin:
-    email = os.environ["GARMIN_EMAIL"]
-    password = os.environ["GARMIN_PASSWORD"]
-
     if TOKENSTORE.exists():
         try:
             client = Garmin()
@@ -56,6 +51,12 @@ def get_client() -> Garmin:
             return client
         except Exception:
             print("Saved session expired, re-authenticating...")
+
+    email = os.environ.get("GARMIN_EMAIL")
+    password = os.environ.get("GARMIN_PASSWORD")
+    if not (email and password):
+        print("ERROR: no cached session and GARMIN_EMAIL / GARMIN_PASSWORD are not set (see .env.example).")
+        sys.exit(1)
 
     _check_connectivity()
 

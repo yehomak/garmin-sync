@@ -1,4 +1,0 @@
-garminconnect>=0.3.3
-garth>=0.8.0
-duckdb>=1.5.3
-python-dotenv>=1.2.2

@@ -1,134 +1,59 @@
-# garmin-sync — Claude context
+# garmin-sync
 
-## Stack
-Python 3.13, garminconnect 0.3.x (unofficial Garmin Connect API), DuckDB (read-write for sync, read-only for Personalkin MCP tools)
-No FIT file parsing — daily-granularity JSON endpoints only.
+Garmin Connect → local DuckDB (`garmin_sync/sync.py`), plus a read-only MCP server over it (`garmin_sync/server.py`).
+Python 3.13, `uv`, DuckDB, `garminconnect` 0.3.x (unofficial API), `mcp` 2.x (`MCPServer`, not v1 `FastMCP`).
 
-## Key commands
-```bash
-# Authenticate (first time or if session expired)
-.venv/bin/python auth.py
+## Verify every change
 
-# Explore raw API responses for a date
-.venv/bin/python explore.py --date 2026-05-21
+Run `/verify` (ruff, pytest, `docs --check`, `evals.run --check`). All four are offline and take seconds.
+Don't say something works until they pass. For sync changes, also ask to run `garmin-sync --date <recent>` against
+the real account.
 
-# Sync a specific date
-.venv/bin/python sync.py --date 2026-05-21
-
-# Backfill last N days
-.venv/bin/python sync.py --backfill 365
-
-# Verify imports
-.venv/bin/python -c "import sync; print('ok')"
-```
-
-## Project structure
-```
-auth.py              — get_client() → authenticated Garmin instance; session saved to .garth/
-auth_interactive.py  — first-time auth fallback using garth.http.Client directly
-explore.py           — calls all endpoints, dumps raw JSON to data/raw/ for inspection
-sync.py              — fetches data for a date range and upserts into garmin.duckdb
-schema.sql           — DuckDB table definitions; applied on every sync run (IF NOT EXISTS)
-.env                 — gitignored; GARMIN_EMAIL and GARMIN_PASSWORD
-.garth/              — gitignored; session tokens from garminconnect
-data/raw/            — gitignored; JSON dumps from explore.py
-garmin.duckdb        — gitignored; the output database read by Personalkin
-```
-
-## Key files
-- `sync.py` — read before adding any endpoint; extraction pattern is `_extract_*(data) → dict`, called in `_fetch_day()`
-- `schema.sql` — source of truth for column names; sync.py builds INSERT statements dynamically from dict keys, so column names must match exactly
-- `explore.py` — run this on a new date after adding endpoints to verify responses before wiring into sync.py
-
-## PR workflow
-All changes go through PRs — even solo work, for history and review.
+## Commands
 
 ```bash
-git checkout -b feat/short-description   # or fix/ or chore/
-# ... make changes ...
-git add <files>
-git commit -m "feat: description"
-git push -u origin feat/short-description
-gh pr create --fill                      # uses PR template automatically
+.venv/bin/python -m pytest
+.venv/bin/ruff check . && .venv/bin/ruff format .
+.venv/bin/python -m garmin_sync.docs          # regenerate docs/DATA.md after any schema.sql change
+.venv/bin/garmin-demo                         # synthetic demo.duckdb
+GARMIN_DB=demo.duckdb .venv/bin/garmin-mcp    # server against demo data
+.venv/bin/python -m evals.run --check         # free; full run needs ANTHROPIC_API_KEY and costs money: ask first
+.venv/bin/garmin-sync --status                # real DB summary, no network
 ```
 
-PR template is at `.github/pull_request_template.md` — fill in What / Why / Schema changes / checklist.
+## Layout
 
-**Schema changes**: `schema.sql` uses `IF NOT EXISTS` so new columns need an `ALTER TABLE` on existing DBs.
-Adding columns to an existing install: `ALTER TABLE health_days ADD COLUMN col_name TYPE;`
-If the column is new and no existing data is worth preserving: delete `garmin.duckdb` and run `sync.py --backfill N`.
+`extract.py` maps raw JSON to rows (pure) · `sync.py` orchestrates · `schema.sql` is the source of truth for columns
+**and their meaning** · `tools.py` is the query layer the model sees · `server.py` is thin MCP wiring ·
+`demo.py` makes synthetic data · `evals/` holds Claude-in-the-loop evals. Details: `docs/ARCHITECTURE.md`.
 
-## Adding a new endpoint
-1. Add the call to `explore.py` endpoints list
-2. Run `explore.py` to see the raw JSON
-3. Write an `_extract_*()` helper in `sync.py` mapping raw keys → column names
-4. Call it inside `_fetch_day()` with a try/except
-5. Add the column to `schema.sql`
-6. Delete `garmin.duckdb` if you need to rebuild the schema (or `ALTER TABLE` if you want to preserve data)
+## Rules
 
-## Conventions
-- All syncs are **read-only from Garmin, write to local DuckDB** — no posts or mutations to Garmin
-- **No credentials in source** — env vars only via `.env`
-- Upserts use `ON CONFLICT (pk) DO UPDATE SET` — reruns are safe and idempotent
-- `_fetch_day()` wraps each endpoint call in try/except so one failure doesn't abort the whole day
-- `signal.alarm(45)` timeout in `auth.py` prevents login hanging forever through exhausted strategies
-- Garmin rate-limits mobile login per IP — if 429, wait 30-60 min or use VPN (US server)
+- **Never send writes to Garmin.** Every Garmin call is a read. Ask before any command that hits the network
+  (`sync`, `explore`, `physiology`); Garmin rate-limits by IP, with 30–60 min lockouts.
+- **This repo is public; the author's real health data sits beside it.** `garmin.duckdb`, `data/`, `.env` and
+  `.garth/` never go in git, and their values never go in code, fixtures, docs or commit messages. Fixtures are
+  invented. Run the `privacy-reviewer` agent before committing tests, docs or examples.
+- **Schema changes are additive:** column in `CREATE TABLE` + `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in the
+  migrations block + `COMMENT ON COLUMN`, then regenerate docs. Never rename or drop a column: Personalkin, a private
+  downstream consumer, reads columns by name and calls `python sync.py` (keep the root shim).
+- **Missing is `None`, never `0`.** `secs_to_min(0)` is `0.0`; `secs_to_min(None)` is `None`.
+- **Tools return dicts that include `**_freshness(con)`**, anchor windows to the latest synced date with
+  `_window()`, and put caveats in `notes`. Tool docstrings are the model's only docs: say *when* to use the tool.
+- New workflows: `/add-field` for a Garmin metric, `/add-tool` for an MCP tool, `/commit-push-pr` to ship.
 
-## Credentials
-- `GARMIN_EMAIL` — Garmin Connect account email
-- `GARMIN_PASSWORD` — Garmin Connect account password
-Both in `.env`. Session tokens cached in `.garth/` after first auth.
+## Garmin API facts (verified, not obvious)
 
-## DB schema
+- Use `get_activity_hr_in_timezones(id)` for HR zones (`[{zoneNumber, secsInZone}]`). `get_activity_details`
+  has no zone summary; that bug left zones null for months.
+- Activities logged by hand have `manualActivity: true`, no HR, no load and an empty zones list.
+- `hrvWeeklyAverage` in training readiness is in 0.1 ms units.
+- `training_status_phrase` carries numeric suffixes (`PRODUCTIVE_3`, `STRAINED_1`).
+- `hrv_status` lags (weekly average); use `hrv_band` for a single night.
+- `max_metrics`, `lactate_threshold` and `body_composition` return nothing for this account.
+- `bodyBatteryMostRecentValue` for the current day is a mid-day value.
 
-**health_days** — one row per calendar date
-```
-date                    DATE PRIMARY KEY
-steps, step_goal        INTEGER
-floors_up               FLOAT
-distance_km             FLOAT
-calories_total, calories_active, calories_bmr  INTEGER
-hr_min, hr_max, rhr     INTEGER
-stress_avg              INTEGER
-bb_max, bb_min, bb_end  INTEGER          -- body battery (highest/lowest/most-recent)
-moderate_activity_min, vigorous_activity_min  INTEGER
-sleep_start, sleep_end  TIMESTAMP
-sleep_score             INTEGER
-sleep_qualifier         VARCHAR          -- 'GOOD', 'FAIR', 'POOR'
-sleep_total_min, sleep_deep_min, sleep_light_min, sleep_rem_min, sleep_awake_min  FLOAT
-sleep_spo2_avg, sleep_rr_avg  FLOAT
-hrv_weekly_avg, hrv_last_night, hrv_baseline_low, hrv_baseline_high  FLOAT
-hrv_status              VARCHAR
-spo2_avg, spo2_min      FLOAT
-rr_waking_avg           FLOAT
-training_readiness_score  INTEGER        -- 0-100 composite score
-training_readiness_level  VARCHAR        -- 'PRIME', 'GOOD', 'MODERATE', etc.
-recovery_time_hours     INTEGER
-endurance_score         INTEGER          -- raw Garmin scale (~3570–10560)
-fitness_age             FLOAT            -- Garmin's computed fitness age
-training_status_phrase  VARCHAR          -- 'PRODUCTIVE', 'PEAKING', 'DETRAINING', 'OVERREACHING', etc.
-training_load_balance   VARCHAR          -- 'BELOW_TARGETS', 'WITHIN_TARGETS', 'ABOVE_TARGETS'
-acwr_status             VARCHAR          -- acute:chronic workload ratio — 'LOW', 'OPTIMAL', 'HIGH'
-```
+## PRs
 
-**health_activities** — one row per workout
-```
-activity_id             VARCHAR PRIMARY KEY
-date                    DATE
-start_time              TIMESTAMP
-activity_type           VARCHAR          -- 'running', 'strength_training', 'boxing', etc.
-duration_min            FLOAT
-distance_km             FLOAT
-avg_hr, max_hr          INTEGER
-calories                INTEGER
-training_effect_aerobic, training_effect_anaerobic  FLOAT
-training_load           FLOAT
-hr_zone1_min … hr_zone5_min  FLOAT
-```
-
-## API notes
-- `garminconnect` tries 4 login strategies in sequence; mobile ones often 429 on first use
-- `garth` (underlying auth library) is deprecated at module level — use `garth.http.Client` directly if needed
-- `get_body_battery(date)` returns a list; the daily summary data is also in `get_stats()` under `bodyBatteryHighestValue` etc.
-- `hrvWeeklyAverage` in `training_readiness` response is in 0.1ms units — divide by 10 for ms
-- `max_metrics`, `lactate_threshold`, `body_composition` return empty/null for this account — skip
+Branch `feat/` · `fix/` · `chore/`, conventional commits, `gh pr create --fill`, template in `.github/`.
+Ask before pushing.
