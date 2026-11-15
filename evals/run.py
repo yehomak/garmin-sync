@@ -1,12 +1,17 @@
 """
 End-to-end eval: Claude answers real questions through the real MCP server, graded against SQL ground truth.
 
-  python -m evals.run --check        # no API calls: builds the demo DB, computes ground truth, converts tools
-  python -m evals.run                # full run (needs ANTHROPIC_API_KEY; costs a few cents per case)
-  python -m evals.run -k staleness   # one case
+  python -m evals.run --check                    # no model calls: ground truth, graders, tool conversion
+  python -m evals.run                            # Messages API (needs ANTHROPIC_API_KEY)
+  python -m evals.run --backend claude-code      # headless Claude Code on your Claude login, no API key
+  python -m evals.run -k staleness               # one case
 
-The model talks to the same MCPServer a Claude Code user gets (tool descriptions and server
-instructions included), over an in-memory MCP client. Results go to evals/results/ (gitignored).
+Backends:
+  api          A minimal tool loop over the Messages API, talking to the server through an in-memory MCP client.
+  claude-code  `claude -p` with only this MCP server attached, every built-in tool disabled, run from an empty
+               directory so no project CLAUDE.md is loaded. This is the closest thing to a real user's session.
+
+Results go to evals/results/ (gitignored).
 """
 
 import argparse
@@ -14,6 +19,9 @@ import asyncio
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import time
 from datetime import date, timedelta
 from pathlib import Path
@@ -87,6 +95,10 @@ async def run_case(client, mcp_client: Client, api_tools: list[dict], instructio
             results.append({"type": "tool_result", "tool_use_id": block.id, "content": text, "is_error": out.is_error})
         messages.append({"role": "user", "content": results})
 
+    return grade(case, expected, final_text, called, usage, response.stop_reason if response else None)
+
+
+def grade(case: Case, expected, final_text: str, called: list[str], usage: dict, stop_reason) -> dict:
     match = ANSWER_RE.findall(final_text)
     answer = match[-1].strip() if match else ""
     used_tool = not case.tools or bool(case.tools & set(called))
@@ -98,14 +110,74 @@ async def run_case(client, mcp_client: Client, api_tools: list[dict], instructio
         "answer": answer,
         "tools_called": called,
         "used_required_tool": used_tool,
-        "stop_reason": response.stop_reason if response else None,
+        "stop_reason": stop_reason,
         "usage": usage,
         "final_text": final_text,
     }
 
 
-async def main(selected: list[Case], check_only: bool) -> int:
+BUILTIN_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "Agent", "NotebookEdit"]
+
+
+def run_case_claude_code(case: Case, workdir: Path, mcp_config: Path) -> dict:
+    """One case through headless Claude Code. Parses the stream-json transcript for tool calls."""
+    expected = case.truth(lambda q: tools.query_sql(q, path=DEMO_PATH))
+    cmd = [
+        "claude", "-p", case.question,
+        "--append-system-prompt", SYSTEM_SUFFIX.strip(),
+        "--mcp-config", str(mcp_config), "--strict-mcp-config",
+        "--allowedTools", "mcp__garmin__*",
+        "--disallowedTools", *BUILTIN_TOOLS,
+        "--no-session-persistence", "--output-format", "stream-json", "--verbose",
+    ]  # fmt: skip
+    proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=600)
+    called, final_text, usage, models, stop = [], "", {"input_tokens": 0, "output_tokens": 0}, [], None
+    for line in proc.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "assistant":
+            for block in event["message"].get("content", []):
+                if block.get("type") == "tool_use" and block["name"].startswith("mcp__garmin__"):
+                    called.append(block["name"].removeprefix("mcp__garmin__"))
+        elif event.get("type") == "result":
+            final_text = event.get("result") or ""
+            stop = event.get("subtype")
+            u = event.get("usage") or {}
+            # Claude Code caches its long system prompt, so most input arrives as cache reads and writes.
+            cached = u.get("cache_read_input_tokens", 0) + u.get("cache_creation_input_tokens", 0)
+            usage = {"input_tokens": u.get("input_tokens", 0) + cached, "output_tokens": u.get("output_tokens", 0),
+                     "notional_cost_usd": event.get("total_cost_usd")}  # fmt: skip
+            models = list(event.get("modelUsage") or {})
+    result = grade(case, expected, final_text, called, usage, stop)
+    result["models"] = models
+    if proc.returncode != 0:
+        result["error"] = proc.stderr[-500:]
+    return result
+
+
+def run_claude_code_backend(selected: list[Case]) -> list[dict]:
+    if not shutil.which("claude"):
+        raise SystemExit("`claude` CLI not found. Install Claude Code, or use --backend api.")
+    workdir = Path(tempfile.mkdtemp(prefix="garmin-eval-"))  # empty: no CLAUDE.md, no repo files to peek at
+    server = shutil.which("garmin-mcp") or str(Path(__file__).resolve().parent.parent / ".venv/bin/garmin-mcp")
+    mcp_config = workdir / "mcp.json"
+    mcp_config.write_text(
+        json.dumps({"mcpServers": {"garmin": {"command": server, "env": {"GARMIN_DB": str(DEMO_PATH)}}}})
+    )
+    results = []
+    for case in selected:
+        print(f"  … {case.id}", flush=True)
+        results.append(run_case_claude_code(case, workdir, mcp_config))
+    return results
+
+
+async def main(selected: list[Case], check_only: bool, backend: str = "api") -> int:
     build_demo_db()
+    if backend == "claude-code" and not check_only:
+        t0 = time.monotonic()
+        return report(run_claude_code_backend(selected), "claude-code", t0)
     from garmin_sync.server import mcp  # after GARMIN_DB is set
 
     async with Client(mcp) as mcp_client:
@@ -129,7 +201,10 @@ async def main(selected: list[Case], check_only: bool) -> int:
         client = anthropic.AsyncAnthropic()
         t0 = time.monotonic()
         results = [await run_case(client, mcp_client, api_tools, instructions, c) for c in selected]
+    return report(results, f"api-{MODEL}", t0)
 
+
+def report(results: list[dict], label: str, t0: float) -> int:
     passed = sum(r["passed"] for r in results)
     for r in results:
         mark = "PASS" if r["passed"] else "FAIL"
@@ -145,9 +220,11 @@ async def main(selected: list[Case], check_only: bool) -> int:
     )
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    out = RESULTS_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{MODEL}.json"
+    out = RESULTS_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{label}.json"
     out.write_text(
-        json.dumps({"model": MODEL, "passed": passed, "total": len(results), "results": results}, indent=2, default=str)
+        json.dumps(
+            {"backend": label, "passed": passed, "total": len(results), "results": results}, indent=2, default=str
+        )
     )
     print(f"Saved {out}")
     return 0 if passed == len(results) else 1
@@ -157,6 +234,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="Validate cases and tools without calling the API")
     parser.add_argument("-k", help="Run only cases whose id contains this string")
+    parser.add_argument("--backend", choices=["api", "claude-code"], default="api")
     args = parser.parse_args()
     chosen = [c for c in CASES if not args.k or args.k in c.id]
-    raise SystemExit(asyncio.run(main(chosen, args.check)))
+    raise SystemExit(asyncio.run(main(chosen, args.check, args.backend)))

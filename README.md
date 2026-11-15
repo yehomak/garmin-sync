@@ -96,11 +96,12 @@ A typical change: describe it, let Claude plan, review the plan, let it edit, ru
 ```bash
 .venv/bin/python -m pytest              # unit, sync, tools, MCP protocol, eval loop. ~2 s, no network
 .venv/bin/python -m evals.run --check   # validates every eval case and its grader, no API calls (runs in CI)
-.venv/bin/python -m evals.run           # Claude against the real server. Needs ANTHROPIC_API_KEY.
+.venv/bin/python -m evals.run --backend claude-code   # Claude against the real server, on your Claude login
+.venv/bin/python -m evals.run           # same, over the Messages API. Needs ANTHROPIC_API_KEY.
 ```
 
-**Eval results: not published yet.** The first full run is pending. Results, failures first, will go in
-[docs/LESSONS.md](docs/LESSONS.md).
+**Latest eval: 7/7** (Claude Opus 5.5 via Claude Code, one run). The cases are lookups, so that's a baseline
+rather than proof. Details and the harder trap cases still to add: [docs/LESSONS.md](docs/LESSONS.md#first-eval-run-7-of-7-which-mostly-says-the-cases-are-too-easy).
 
 How it fits together: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

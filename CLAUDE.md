@@ -17,7 +17,8 @@ the real account.
 .venv/bin/python -m garmin_sync.docs          # regenerate docs/DATA.md after any schema.sql change
 .venv/bin/garmin-demo                         # synthetic demo.duckdb
 GARMIN_DB=demo.duckdb .venv/bin/garmin-mcp    # server against demo data
-.venv/bin/python -m evals.run --check         # free; full run needs ANTHROPIC_API_KEY and costs money: ask first
+.venv/bin/python -m evals.run --check         # free, offline
+.venv/bin/python -m evals.run --backend claude-code   # real run on the user's Claude plan (~2 min): ask first
 .venv/bin/garmin-sync --status                # real DB summary, no network
 ```
 

@@ -97,8 +97,31 @@ I could think of (writes, `COPY`, `read_csv` on arbitrary files, `ATTACH`, re-en
 **General rule:** sandbox at the connection, not with string checks on the query. The prefix check in
 `query_sql` exists only to return a helpful error.
 
-## Still open
+## First eval run: 7 of 7, which mostly says the cases are too easy
 
-- **Eval results aren't published yet.** The harness, the cases and the offline checks exist; the first full
-  run against Claude hasn't happened. Results go here, failures first.
+Claude Opus 5.5 through headless Claude Code (`python -m evals.run --backend claude-code`), with only this MCP
+server attached, every built-in tool disabled, and an empty working directory so it couldn't read the
+code or the database directly. One run, 2026-11-15.
+
+| Case | Result | Tools it chose |
+|---|---|---|
+| Average sleep score, last 7 nights | pass | `get_sleep_trend` |
+| Worst night in 14 days | pass | `get_sleep_trend` |
+| Workouts with no heart rate, 4 weeks | pass | `get_training_log` |
+| Longer sleep on weekends? | pass | `describe_schema`, `query_sql` |
+| Readiness gap after short nights | pass | `describe_schema`, `query_sql` ×2 |
+| Nights with HRV below baseline, 14 days | pass | `get_recovery_trend` |
+| How old is the data? | pass | `get_snapshot` |
+
+What it shows: the model picks the curated tool when one fits, and goes to `describe_schema` before writing
+SQL when none does, as the server instructions ask. The demo data ended 4 days before the run, and 6 of 7
+answers mentioned that unprompted. The exception was the all-time weekend question, where freshness
+barely matters.
+
+What it doesn't show: these are lookup questions with one right number. A perfect score on seven of them is
+a regression baseline, not evidence the principles above hold. The cases that would test them are traps:
+"what was my training load last month?" when most sessions are unmeasured, "how did I sleep last night?"
+when the data is days old, "does sleep improve my readiness?" when the link is the formula. Those come next.
+
+## Still open
 - Sleep times are stored in UTC, so bedtime analysis needs a timezone the data doesn't carry.
